@@ -141,7 +141,7 @@ Scrape intervals: node-agent **1 s** (scrape timeout 800 ms). time-api **15 s**.
 | `test` | all unit and integration tests for the component (node-agent: including the asan build) |
 | `image` | `docker buildx build --platform $(PLATFORM) --build-arg VERSION=$(VERSION) --build-arg GIT_SHA=$(GIT_SHA) -t $(IMAGE) --load .` |
 
-Variables, overridable and with these defaults: `IMAGE ?= <component>:dev`, `PLATFORM ?= linux/amd64`, `VERSION ?= 0.0.0-dev`, `GIT_SHA ?= unknown`.
+Variables, overridable and with these defaults: `IMAGE ?= <component>:dev`, `PLATFORM ?= linux/$(shell docker version -f '{{.Server.Arch}}')` (the host's native architecture: `linux/arm64` on Apple Silicon, `linux/amd64` on Intel or AMD), `VERSION ?= 0.0.0-dev`, `GIT_SHA ?= unknown`. The top-level Makefile always passes `PLATFORM=linux/amd64` explicitly for images bound for ECR/EKS.
 
 Component Makefiles **never push** images. Pushing is done by the top-level Makefile.
 
@@ -150,7 +150,8 @@ Component Makefiles **never push** images. Pushing is done by the top-level Make
 
 ### 7.2 Image rules
 - Images are tagged with the git short SHA (12 chars), and tags are immutable. `latest` is never used.
-- Architecture is `linux/amd64`.
+- **Architecture.** Images pushed to ECR and run on EKS are always `linux/amd64`. Local images (`docker run`, kind) are built for the host's **native** architecture. That is `linux/arm64` on the owner's Apple Silicon Mac, where kind nodes are arm64 and amd64 images would run under slow emulation or fail with `exec format error`.
+- So Dockerfiles MUST be architecture-neutral. Base images must be multi-arch, pinned by their **multi-arch index digest** (not a single-platform manifest digest). Never hard-code `amd64` or `x86_64` in download URLs or package names; use BuildKit's `TARGETARCH` / `TARGETPLATFORM` build args where a binary is fetched. Both images MUST build and pass their container tests on `linux/arm64` and on `linux/amd64`.
 - Images run as a non-root user and work with `readOnlyRootFilesystem: true`.
 - Both Dockerfiles accept `ARG VERSION` and `ARG GIT_SHA` and expose them through the `*_build_info` metric.
 
@@ -250,6 +251,7 @@ Up to five agents may run at the same time on the same machine, each in its own 
 | Files | Only your owned paths (§1). Don't edit `specs/`. |
 | kind | Use only the cluster `tt-ws<NN>`. Never create, delete or switch to another agent's cluster, and never delete all clusters. Always pass an explicit `--context kind-tt-ws<NN>` / `--kube-context`. Delete your cluster when you finish. |
 | Local ports | For `docker run -p` and `kubectl port-forward`, use **only** local ports `1NN00`–`1NN99` (WS-20 → 12000–12099, WS-30 → 13000–13099, WS-40 → 14000–14099, WS-50 → 15000–15099). Tests that start their own servers must pick a free ephemeral port. |
+| CPU architecture | The machine is an **Apple Silicon Mac** (arm64). Build every local test image natively (the default `PLATFORM`). Building `linux/amd64` locally is allowed only to prove the image builds for EKS (`make image PLATFORM=linux/amd64`); it is slow under emulation, so do it once, near the end. Never load amd64 images into kind. |
 | Docker | Tag images `<component>:ws<NN>-<anything>`. Never run `docker system prune`, `docker rm -f $(docker ps -aq)` or anything similar that affects containers or images you didn't create. |
 | Cloud | Create no AWS resources unless your spec **and** your launch prompt explicitly allow it. Read-only AWS calls (`sts get-caller-identity`, `terraform plan`) are fine if credentials are present. |
 | Tools | If a required tool is missing, install it user-locally (for example `~/.local/bin`, `uv tool`, `pipx`, or a pinned release binary). Do not use `sudo` or change global system configuration. If you can't install it, mark the dependent checks as skipped, with the reason, in `HANDOFF.md`. |

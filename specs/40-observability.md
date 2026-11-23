@@ -195,7 +195,7 @@ Variable `node`: `label_values(node_agent_cpu_usage_ratio, node)`, multi-select,
 
 ### 4.8 Fake node-agent (`dev/`, for development only)
 - FAKE-1: `fake_node_agent.py` uses only the Python standard library. It serves on `:9102/metrics` **every** metric in contracts §5, with the same names, types, labels and semantics. It generates plausible values: a sine-wave CPU between 10% and 70% with a per-node phase taken from `NODE_NAME`, a slowly drifting memory value, windows computed over the last 60 generated samples, and counters that increase. Setting `FAKE_SPIKE=1` drives CPU to 95% for 60 s, so you can test alerts.
-- FAKE-2: `fake-node-agent.yaml` holds a ConfigMap with the script, plus a DaemonSet in `monitoring` (image `python:3.12-slim`, pod label `app.kubernetes.io/name: node-agent`, port 9102 named `metrics`, `nodeSelector: {workload: app}`), plus the **same PodMonitor** as in `30-node-agent.md` K-8. This lets you see the whole pipeline on kind without WS-30.
+- FAKE-2: `fake-node-agent.yaml` holds a ConfigMap with the script, plus a DaemonSet in `monitoring` (image `python:3.12-slim`, which is multi-arch, so it runs on arm64 kind, pod label `app.kubernetes.io/name: node-agent`, port 9102 named `metrics`, `nodeSelector: {workload: app}`), plus the **same PodMonitor** as in `30-node-agent.md` K-8. This lets you see the whole pipeline on kind without WS-30.
 - FAKE-3: The `dev/` folder is excluded from the packaged chart through `.helmignore`.
 
 ## 5. Interfaces you provide

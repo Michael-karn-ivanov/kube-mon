@@ -142,6 +142,7 @@ Rollout test on kind: `helm upgrade … --set image.tag=dev2` (after `docker tag
 ## 7. Definition of Done
 - [ ] `make -C apps/time-api lint test` is green, including T-8 when Docker is available.
 - [ ] The image is under 150 MB, runs read-only as UID 10001, and both ports work.
+- [ ] The image builds and runs natively on `linux/arm64`, and `make image PLATFORM=linux/amd64` also succeeds.
 - [ ] The chart passes K-15. On kind: 3 pods on 3 distinct nodes, all 3 serve traffic, and an upgrade completes with at most 1% errors.
 - [ ] `/metrics` is unreachable on port 8000 and through the `time-api` Service.
 - [ ] `README.md` files for the app and the chart are written; `VERSIONS.md` is written; `HANDOFF.md` is written (contracts §11).

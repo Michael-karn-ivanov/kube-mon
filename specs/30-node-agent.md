@@ -118,7 +118,7 @@ Invalid config prints an error and exits 2. `NODE_NAME` (from the Downward API) 
 - T-7: All unit tests pass under the asan preset.
 
 ### 4.5 Container image
-- IMG-1: Multi-stage build. The builder is `gcc:13-bookworm` with `cmake` installed; it builds the release preset. Link libstdc++ and libgcc statically (`-static-libstdc++ -static-libgcc`). The runtime image is `gcr.io/distroless/cc-debian12:nonroot`, pinned by digest.
+- IMG-1: Multi-stage build. The builder is `gcc:13-bookworm` with `cmake` installed; it builds the release preset. Link libstdc++ and libgcc statically (`-static-libstdc++ -static-libgcc`). The runtime image is `gcr.io/distroless/cc-debian12:nonroot`, pinned by its multi-arch index digest. Builder and runtime must both work for `linux/arm64` and `linux/amd64` (contracts §7.2).
 - IMG-2: `USER 65532:65532`, `ENTRYPOINT ["/node-agent"]`, `EXPOSE 9102`.
 - IMG-3: The final image is under 30 MB. It works with `--read-only` and no capabilities.
 
@@ -172,6 +172,7 @@ To check accuracy against a reference on a Linux host, run node-exporter beside 
 ## 7. Definition of Done
 - [ ] `make -C agents/node-agent lint test` is green: release, asan and integration.
 - [ ] The image is under 30 MB, runs read-only and non-root with no capabilities, and serves every metric in contracts §5.
+- [ ] The image builds and runs natively on `linux/arm64`, and `make image PLATFORM=linux/amd64` also succeeds. Record both build times in `HANDOFF.md`.
 - [ ] Measured on a Linux host or the kind cluster, with the numbers recorded in `HANDOFF.md`: CPU under 5 m, RSS under 20 MiB, p99 collection time under 1 ms.
 - [ ] The chart passes K-9, and on kind the DaemonSet is 3/3 Ready.
 - [ ] `README.md`, `VERSIONS.md` and `HANDOFF.md` are written (contracts §11).

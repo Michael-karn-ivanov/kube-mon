@@ -46,14 +46,14 @@ Every target is idempotent. Component work is **delegated** to the component Mak
 
 | Target | Does |
 |---|---|
-| `doctor` | `scripts/doctor.sh`: tools present at the minimum versions (§5.1), AWS identity works, `deploy.env` present and complete, buildx can build `linux/amd64`, `chart-version.txt` present. Prints a PASS/FAIL table. |
+| `doctor` | `scripts/doctor.sh`: tools present at the minimum versions (§5.1), AWS identity works, `deploy.env` present and complete, buildx can build `linux/amd64` (on arm64 hosts, this checks emulation works by running `docker run --rm --platform linux/amd64 busybox uname -m`), `chart-version.txt` present. Reports the host architecture. Prints a PASS/FAIL table. |
 | `lint` | `$(MAKE) -C apps/time-api lint`, `-C agents/node-agent lint`, `-C infra/terraform fmt-check validate lint`, `helm lint` + `kubeconform` on all 3 charts, `shellcheck scripts/*.sh` |
 | `test` | `$(MAKE) -C apps/time-api test`, `-C agents/node-agent test`, `-C deploy/helm/observability test` |
 | `tf-bootstrap` | Applies `infra/terraform/bootstrap`, writes `infra/terraform/backend.hcl` (`bucket`, `region`), and sets `TF_STATE_BUCKET=` in `deploy.env` |
 | `tf-cluster` / `tf-platform` | `terraform -chdir=… init -backend-config=../backend.hcl`, then `apply`. It is interactive unless `AUTO_APPROVE=1`. Variables go in as `TF_VAR_*` (contracts §9). |
 | `tf-plan` | `plan` for cluster and platform |
 | `kubeconfig` | `aws eks update-kubeconfig --name time-telemetry-dev --region $(REGION) --alias time-telemetry-dev` |
-| `build` | Refuses to run if the git tree is dirty (unless `ALLOW_DIRTY=1`). Then `$(MAKE) -C apps/time-api image IMAGE=$(REGISTRY)/time-api:$(GIT_SHA) VERSION=$(VERSION) GIT_SHA=$(GIT_SHA)`, and the same for node-agent. |
+| `build` | Refuses to run if the git tree is dirty (unless `ALLOW_DIRTY=1`). Then `$(MAKE) -C apps/time-api image IMAGE=$(REGISTRY)/time-api:$(GIT_SHA) PLATFORM=linux/amd64 VERSION=$(VERSION) GIT_SHA=$(GIT_SHA)`, and the same for node-agent. **Always amd64**, whatever the host. After building, verify with `docker image inspect -f '{{.Architecture}}'` that the result is `amd64`, so an arm64 image can never be pushed to ECR. |
 | `push` | ECR login. For each image, skip if the tag already exists in ECR (tags are immutable), otherwise `docker push`. |
 | `grafana-secret` | Creates `monitoring/grafana-admin` with a random 24-character password if it doesn't exist. Never overwrites. |
 | `deploy-monitoring` | `helm repo add/update`, then `helm upgrade --install kps prometheus-community/kube-prometheus-stack --version $(KPS_VERSION) -n monitoring -f deploy/monitoring/values.yaml --wait --timeout 10m` |
@@ -73,7 +73,7 @@ Every target is idempotent. Component work is **delegated** to the component Mak
 | `rollback-app [REV=n]` / `rollback-agent [REV=n]` | `helm rollback <release> [n] --wait` |
 | `destroy` | Ordered teardown (§5.8). Asks for confirmation unless `CONFIRM=yes`. |
 | `verify-clean` | `scripts/verify_clean.sh` (§5.8, step 5) |
-| `local-up` | Creates the kind cluster from `scripts/kind-config.yaml`, builds both images (`IMAGE=<name>:local`), runs `kind load`, creates the namespaces and the grafana secret, then deploys all 4 releases with the `values-local.yaml` files (`KCTX=kind-time-telemetry`, using `--create-namespace`) |
+| `local-up` | Creates the kind cluster from `scripts/kind-config.yaml`, builds both images for the **native** platform (`IMAGE=<name>:local`, default `PLATFORM`; never amd64 on an arm64 host), runs `kind load`, creates the namespaces and the grafana secret, then deploys all 4 releases with the `values-local.yaml` files (`KCTX=kind-time-telemetry`, using `--create-namespace`) |
 | `local-endpoint` | port-forward `svc/time-api` to `:8080` |
 | `local-smoke` | The smoke test against kind, without the NLB checks |
 | `local-down` | `kind delete cluster --name time-telemetry` |
@@ -101,7 +101,7 @@ This section is the source for the root `README.md`. The Makefile and scripts MU
 | `terraform` ≥ 1.11 | |
 | `kubectl` | within ±1 minor of the cluster version |
 | `helm` ≥ 3.14 | |
-| `docker` + `buildx` | On Apple Silicon, `linux/amd64` builds run under emulation, so the C++ build is slow there |
+| `docker` + `buildx` | On Apple Silicon, `make build` (amd64, for ECR) runs under emulation: the Python image takes about 1–2 min, but the C++ image can take 5–15 min. Turn on Docker Desktop → Settings → General → *Use Rosetta for x86_64/amd64 emulation* to speed it up. Local and kind builds are native arm64 and fast. |
 | `git`, `make`, `jq`, `curl` | |
 | `kind` | local only |
 | `promtool`, `kubeconform`, `shellcheck`, `tflint`, `uv`, `cmake`, `g++` | only for `make lint test` |
@@ -201,7 +201,8 @@ If step 4 fails with `DependencyViolation` on the VPC or subnets, the usual caus
 | `kubectl` times out | your IP is not in `OPERATOR_CIDRS` | update it and run `make tf-cluster` |
 | `tf-cluster` fails launching instances | vCPU quota | request an increase (§5.1) |
 | `ImagePullBackOff` | the tag isn't in ECR | `make push`; compare the pod's image with `aws ecr describe-images` |
-| `exec format error` | arm64 image | rebuild with `make build` (it forces `linux/amd64`) |
+| `exec format error` on EKS | an arm64 image was pushed | rebuild with `make build` (it forces and verifies `linux/amd64`); push a new commit's tag, because tags are immutable |
+| `exec format error`, or very slow pods, on kind (Mac) | an amd64 image was loaded into arm64 kind | rebuild with the default native `PLATFORM` (`make local-up` does this) |
 | `EXTERNAL-IP <pending>` for over 5 min | LBC down or missing IAM, or subnets untagged | `kubectl -n kube-system logs deploy/aws-load-balancer-controller`; check the Pod Identity association and the `kubernetes.io/role/elb` subnet tag |
 | NLB resolves but times out | `TIME_API_SOURCE_RANGES` excludes you, or targets are unhealthy | `aws elbv2 describe-target-health`; check `/readyz` |
 | time-api pod Pending | fewer than 3 schedulable nodes (anti-affinity) | `kubectl get nodes`; `kubectl describe pod` |
@@ -270,7 +271,7 @@ On every PR and push:
 - job `infra`: `make -C infra/terraform fmt-check validate lint`
 - job `observability`: `make -C deploy/helm/observability test`
 - job `charts`: `helm lint` + `kubeconform` on all 3 charts, `shellcheck scripts/*.sh`
-- job `images`: build both images (no push)
+- job `images`: build both images for `linux/amd64` and `linux/arm64` (no push)
 - job `kind-e2e` (on PRs to `main`): `make local-up local-smoke`
 
 Pushing to ECR from CI through GitHub OIDC is optional and out of scope for the first delivery.
